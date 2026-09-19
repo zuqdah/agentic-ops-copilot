@@ -77,9 +77,15 @@ jobs:
               -var="resource_group_name=${{ vars.LAB_RESOURCE_GROUP }}" \
               -var="restart_role_definition_id=${{ vars.RESTART_ROLE_DEFINITION_ID }}"
           }
-          # azurerm occasionally fails while polling a delete Azure has
-          # already accepted; a second pass refreshes state and finishes.
-          destroy || { echo "::warning::Destroy failed once; retrying."; sleep 30; destroy; }
+          # azurerm intermittently fails while polling deletes Azure has
+          # already accepted (container apps, then their environment). Each
+          # pass refreshes state and gets further; a real failure still fails.
+          for attempt in 1 2 3; do
+            if destroy; then exit 0; fi
+            echo "::warning::Destroy attempt $attempt failed; retrying."
+            sleep 30
+          done
+          destroy
 
       - uses: azure/login@v3
         with:
