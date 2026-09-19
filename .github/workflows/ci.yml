@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_VERSION: "1.16.3"
+
+jobs:
+  terraform:
+    name: Terraform format, validate, lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Format
+        run: terraform fmt -check -recursive
+
+      - name: Validate
+        run: |
+          for dir in bootstrap infra; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+
+      - uses: terraform-linters/setup-tflint@v6
+
+      - name: Lint
+        run: |
+          tflint --init --config "$GITHUB_WORKSPACE/.tflint.hcl"
+          tflint --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl"
+
+  security:
+    name: Checkov policy scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: bridgecrewio/checkov-action@v12
+        with:
+          config_file: .checkov.yaml
+
+  python:
+    name: Tests and tool server image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/agentops-mcp
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Test the MCP tool server
+        working-directory: mcp
+        run: |
+          pip install -r requirements-dev.txt
+          python -m pytest -q
+
+      - name: Test the approval gate
+        working-directory: agents
+        run: |
+          pip install -r requirements-dev.txt
+          python -m pytest -q
+
+      - name: Build image
+        run: >-
+          docker build mcp
+          --tag "$IMAGE:${{ github.sha }}"
+          --tag "$IMAGE:latest"
+          --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}"
+
+      # Publishing from main means the package exists before the first deploy.
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: docker push --all-tags "$IMAGE"
+
+  plan:
+    name: Terraform plan
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [terraform, security, python]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Mask Azure identifiers
+        run: |
+          echo "::add-mask::$ARM_SUBSCRIPTION_ID"
+          echo "::add-mask::$ARM_TENANT_ID"
+          echo "::add-mask::$ARM_CLIENT_ID"
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Init
+        run: >-
+          terraform init -input=false
+          -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}"
+          -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}"
+          -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}"
+          -backend-config="key=infra.tfstate"
+
+      - name: Plan
+        run: >-
+          terraform plan -input=false -lock-timeout=5m
+          -var="resource_group_name=${{ vars.LAB_RESOURCE_GROUP }}"
+          -var="restart_role_definition_id=${{ vars.RESTART_ROLE_DEFINITION_ID }}"

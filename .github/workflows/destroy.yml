@@ -1,0 +1,113 @@
+name: Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy" to remove every lab resource.'
+        required: true
+  # Nightly teardown at 07:00 UTC (2 AM Central). With nothing deployed this
+  # is a no-op that finishes in seconds.
+  schedule:
+    - cron: "0 7 * * *"
+
+concurrency:
+  group: agentops-infra
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_VERSION: "1.16.3"
+
+jobs:
+  destroy:
+    name: Terraform destroy
+    # Skips cleanly until the repository is connected to Azure.
+    if: vars.AZURE_CLIENT_ID != '' && (github.event_name == 'schedule' || inputs.confirm == 'destroy')
+    runs-on: ubuntu-latest
+    environment: lab
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Mask Azure identifiers
+        run: |
+          echo "::add-mask::$ARM_SUBSCRIPTION_ID"
+          echo "::add-mask::$ARM_TENANT_ID"
+          echo "::add-mask::$ARM_CLIENT_ID"
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Init
+        run: >-
+          terraform init -input=false
+          -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}"
+          -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}"
+          -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}"
+          -backend-config="key=infra.tfstate"
+
+      - name: Check for deployed resources
+        id: state
+        run: |
+          count=$(terraform state list 2>/dev/null | wc -l)
+          echo "resources=$count" >> "$GITHUB_OUTPUT"
+          echo "Resources in state: $count"
+
+      - name: Destroy
+        if: steps.state.outputs.resources != '0'
+        run: |
+          destroy() {
+            terraform destroy -input=false -auto-approve -lock-timeout=5m \
+              -var="resource_group_name=${{ vars.LAB_RESOURCE_GROUP }}" \
+              -var="restart_role_definition_id=${{ vars.RESTART_ROLE_DEFINITION_ID }}"
+          }
+          # azurerm occasionally fails while polling a delete Azure has
+          # already accepted; a second pass refreshes state and finishes.
+          destroy || { echo "::warning::Destroy failed once; retrying."; sleep 30; destroy; }
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Application Insights makes Azure add a smart-detection alert rule and
+      # action group that Terraform doesn't manage.
+      - name: Sweep auto-created alert resources
+        run: |
+          ids=$(az resource list -g "${{ vars.LAB_RESOURCE_GROUP }}" \
+            --query "[?type=='microsoft.alertsmanagement/smartDetectorAlertRules' || type=='microsoft.insights/actiongroups'].id" -o tsv)
+          if [ -n "$ids" ]; then
+            # One ID per line; the action group's name contains spaces.
+            while IFS= read -r id; do
+              az resource delete --ids "$id"
+            done <<< "$ids"
+            echo "Removed $(echo "$ids" | wc -l) auto-created alert resources."
+          else
+            echo "Nothing to sweep."
+          fi
+          echo "Remaining in ${{ vars.LAB_RESOURCE_GROUP }}: $(az resource list -g "${{ vars.LAB_RESOURCE_GROUP }}" --query 'length(@)' -o tsv)"
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.state.outputs.resources }}" = "0" ]; then
+            echo "Nothing deployed; no changes." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Destroyed ${{ steps.state.outputs.resources }} resources. Lab spend is back to zero." >> "$GITHUB_STEP_SUMMARY"
+          fi

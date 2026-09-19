@@ -1,0 +1,15 @@
+# Terraform working data and local state. Bootstrap state is local by design;
+# infra state lives in the remote backend.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+*.tfvars
+!*.tfvars.example
+.terraform.tfstate.lock.info
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/

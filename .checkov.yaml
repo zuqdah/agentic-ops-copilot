@@ -1,0 +1,15 @@
+# Checkov configuration. Resource-level exceptions live inline next to the
+# code they apply to (#checkov:skip=...), each with its reason.
+directory:
+  - .
+framework:
+  - terraform
+  - github_actions
+  - dockerfile
+compact: true
+quiet: true
+skip-check:
+  # CKV_GHA_7 is an SLSA build-provenance rule that rejects any
+  # workflow_dispatch input. Here the inputs choose an infrastructure tier
+  # (deploy) or confirm a teardown (destroy); neither affects the image build.
+  - CKV_GHA_7
