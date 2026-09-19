@@ -191,14 +191,16 @@ def test_mcp_endpoint_requires_the_key(client, headers):
     assert client.post("/mcp", headers=headers, content="{}").status_code == 401
 
 
-def test_correct_key_reaches_the_mcp_transport(client):
-    # Past the key check, the transport itself answers; a 401 here would mean
-    # the key check rejected a valid key.
-    response = client.post(
-        "/mcp",
-        headers={"x-lab-key": "correct-key", "content-type": "application/json"},
-        content=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}),
-    )
+def test_correct_key_reaches_the_mcp_transport():
+    # As a context manager so the app's lifespan runs and the MCP session
+    # manager starts. Past the key check the transport itself answers, so a
+    # 401 here would mean a valid key was rejected.
+    with TestClient(server.build_app()) as running:
+        response = running.post(
+            "/mcp",
+            headers={"x-lab-key": "correct-key", "content-type": "application/json"},
+            content=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}),
+        )
     assert response.status_code != 401
 
 
