@@ -39,7 +39,7 @@ flowchart LR
 | **MCP in practice** | A tool server I wrote (`mcp/server.py`), registered with the agent as an MCP server and authenticated through a Foundry project connection. |
 | **Human-in-the-loop** | Every tool call returns an approval request. Reads are auto-approved; writes and any *unrecognized* tool are refused unless a human allows them. Tested in `agents/tests/test_ask.py`. |
 | **Least privilege, twice over** | The tool server's identity holds Reader plus a custom role whose only action is `Microsoft.App/containerApps/revisions/restart/action`. Even if the agent were talked into anything else, Azure would refuse. |
-| **Infrastructure as code** | Terraform for the Foundry account, project, model, tool server, identities, and the agent's auth connection. The observability and Key Vault modules are consumed from the [landing zone lab](https://github.com/zuqdah/azure-agent-landing-zone) at pinned tags. |
+| **Infrastructure as code** | Terraform for the Foundry account, project, model, tool server, identities, and the agent's auth connection. The observability and Key Vault modules are consumed from the [landing zone lab](https://github.com/zuqdah/azure-agent-landing-zone) at pinned commits. |
 | **Cost control** | Prompt agents add no compute cost, the tool server scales to zero, logs are capped, deploys are manual, and a nightly teardown removes everything. |
 
 ## The approval gate
@@ -126,7 +126,7 @@ An agent turn costs more than a single chat call because tool results are fed ba
 - **Approval decided by the client, not the model.** `require_approval="always"` sends every call back, and policy in code decides. Asking a model to respect its own guardrail is not a guardrail.
 - **A custom role for one action.** Reader plus `restart/action` means the blast radius is bounded by Azure, independent of prompt or policy bugs.
 - **REST instead of Azure SDKs in the tool server.** Three SDKs would be three version surfaces to track; the REST calls are pinned to explicit API versions and are readable in one file.
-- **Shared modules by tag.** Observability and Key Vault come from the landing zone lab at `v1.1.0` and `v1.0.0`. Reuse without copy-paste, and version changes are deliberate.
+- **Shared modules by commit.** Observability and Key Vault come from the landing zone lab, pinned to the commits behind `v1.1.0` and `v1.0.0`. Reuse without copy-paste, and because a tag can be moved to different code, the pin is the commit.
 
 ## Part of a series
 

@@ -244,4 +244,5 @@ def build_app() -> Any:
     return RequireKey(routes, _config("LAB_KEY"))
 
 
-app = build_app()
+# Built by uvicorn at startup (see the Dockerfile's --factory flag) rather
+# than at import, so tests can import this module without configuration.

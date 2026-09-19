@@ -37,7 +37,9 @@ locals {
 # ---------------------------------------------------------------------------
 
 module "observability" {
-  source = "git::https://github.com/zuqdah/azure-agent-landing-zone.git//modules/observability?ref=v1.1.0"
+  # Pinned to a commit, not a tag: a tag can be moved to different code.
+  # cf3c8dc is tag v1.1.0 of the landing zone lab.
+  source = "git::https://github.com/zuqdah/azure-agent-landing-zone.git//modules/observability?ref=cf3c8dc50ab7eebf4ace424e40f19077081fd618"
 
   name                = local.name
   location            = local.location
@@ -47,7 +49,8 @@ module "observability" {
 }
 
 module "keyvault" {
-  source = "git::https://github.com/zuqdah/azure-agent-landing-zone.git//modules/keyvault?ref=v1.0.0"
+  # 335bc3b is tag v1.0.0 of the landing zone lab.
+  source = "git::https://github.com/zuqdah/azure-agent-landing-zone.git//modules/keyvault?ref=335bc3bb3b64b633c028b6df8d21599a294e8f6c"
 
   name                = replace(local.name, "-", "")
   location            = local.location
