@@ -13,6 +13,10 @@ resource "azurerm_cognitive_account" "this" {
   # Required for Entra ID authentication and for the project endpoint.
   custom_subdomain_name = "aif-${var.name}"
 
+  # Without this, creating a project fails: "Project can only created under
+  # AIServices Kind account with allowProjectManagement set to true".
+  project_management_enabled = true
+
   # No API keys: agents and callers authenticate as Entra ID identities.
   local_auth_enabled                 = false
   public_network_access_enabled      = var.public_network_access_enabled
