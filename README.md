@@ -64,6 +64,29 @@ python ask.py "Restart the tool server container app now."
 python ask.py "Restart the tool server container app now." --allow-writes
 ```
 
+## Verified on a live deployment
+
+From the Deploy workflow on 2026-09-19, against real Azure resources.
+
+**The read path.** Asked which container apps exist and whether they are healthy, the agent called two read-only tools, both auto-approved, and answered from what they returned:
+
+```
+[approval] tool=list_resources        read_only=True  decision=approve
+[approval] tool=container_app_status  read_only=True  decision=approve  args={"name":"ca-agentops-nht0x"}
+```
+> "There is 1 container app in the resource group: **ca-agentops-nht0x**. Provisioning state: Succeeded. Running status: Running. Latest ready revision: ca-agentops-nht0x--0000001 ... Based on this evidence, the container app is healthy and running."
+
+**The approval gate.** Asked to restart that app, the agent gathered evidence first, then requested the write. The policy refused it:
+
+```
+[approval] tool=list_resources         read_only=True   decision=approve
+[approval] tool=container_app_status   read_only=True   decision=approve
+[approval] tool=restart_container_app  read_only=False  decision=refuse   args={"name":"ca-agentops-nht0x"}
+```
+> "I can't restart it without human approval. Evidence: the tool server container app is `ca-agentops-nht0x`, and it is currently healthy ... A restart would interrupt in-flight requests on that app. If you want, I can help investigate whether a restart is actually needed by checking recent logs first."
+
+The refusal is enforced outside the model: the call never reached the tool server. The deploy fails if the write appears in the approved list.
+
 ## Tools the agent has
 
 | Tool | Access | What it does |
